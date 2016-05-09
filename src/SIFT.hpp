@@ -11,7 +11,10 @@ using namespace std;
 struct Feature {
 	float __x;
 	float __y;
+	float __ori;
+	float __contrast;
 	float __scl;
+	vector<double> __descriptor;
 
 	int __r;
 	int __c;
@@ -21,8 +24,6 @@ struct Feature {
 
 	float __sub_interval;
 	float __scl_octave;
-
-	float __ori;
 };
 /*****************************SIFT*********************************************/
 
@@ -50,11 +51,18 @@ struct Feature {
 #define SIFT_ORI_SMOOTH_PASSES 2
 #define SIFT_ORI_PEAK_RATIO 0.8
 
+#define SIFT_DESCR_SCL_FCTR 3.0
+#define SIFT_DESCR_MAG_THR 0.2
+#define SIFT_INT_DESCR_FCTR 512.0
+
+#define SIFT_KEYPOINT_DIAMETER 2.0
+
 /**
  * [Detect & extract sift features for an image]
  *
  * @param img             [source image for extract sift features : grayscale image with pixel values in 0.0f~1.0f]
- * @param feats           [vector for store sift features extracted]
+ * @param keypoints       [vector for store sift feature point]
+ * @param descriptor      [Mat for store sift descriptor, each row for a keypoint]
  * @param intervals       [the number of sampled intervals per octave]
  * @param sigma           [sigma for initial gaussian smoothing]
  * @param contrast_thres  [threshold on keypoint contrast]
@@ -63,10 +71,26 @@ struct Feature {
  * @param descr_width     [width of descriptor histogram array]
  * @param descr_hist_bins [number of bins per histogram in descriptor array]
  */
-void extractSiftFeatures(const Mat &img, vector<Feature> &feats, int intervals = SIFT_INTERVALS,
+void extractSiftFeatures(const Mat &img, vector<KeyPoint> &keypoints, Mat &descriptor, int intervals = SIFT_INTERVALS,
                          double sigma = SIFT_SIGMA, double contrast_thres = SIFT_CONTRAST_THRES,
                          int curvature_thres = SIFT_CURVATURE_THRES, bool img_dbl = SIFT_IMG_DBL,
                          int descr_width = SIFT_DESCR_WIDTH, int descr_hist_bins = SIFT_DESCR_HIST_BINS);
+
+/**
+ * [convert features to keypoints]
+ *
+ * @param feats     [features in vector]
+ * @param keypoints [returned keypoint vector]
+ */
+void __feats2KeyPoints(const vector<Feature> &feats, vector<KeyPoint> &keypoints);
+
+/**
+ * [convert features from vector to Mat]
+ *
+ * @param feats [features in vector]
+ * @param mat   [returned Mat]
+ */
+void __featsVec2Mat(const vector<Feature> &feats, Mat &mat);
 
 /**
  * [Create the initial image for builing gaussian pyramid, optionally double the image size before smoothing]
@@ -269,5 +293,58 @@ static void __smoothOriHist(vector<double> &hist);
  * @param feat       [template feat]
  */
 static void __addGoodOriFeatures(queue<Feature> &feat_queue, const vector<double> &hist, double mag_thres, const Feature &feat);
+
+/**
+ * [Computes feature descriptors]
+ *
+ * @param feats            [feature vector]
+ * @param gaussian_pyramid [Gaussian pyramid]
+ * @param layer_per_octave [number of layers per octave in Gaussian pyramid]
+ * @param d                [width of 2d hist]
+ * @param n                [number of bins for descriptor]
+ */
+static void __computeDescriptors(vector<Feature> &feats, const vector<Mat> &gaussian_pyramid, int layer_per_octave, int d, int n);
+
+/**
+ * [Computes the 2D array of orientation histograms]
+ *
+ * @param gaussian [gaussian image]
+ * @param hist     [returned dxdxn hist vector]
+ * @param r        [row]
+ * @param c        [col]
+ * @param ori      [orientation]
+ * @param scl      [scl scale relative to image]
+ * @param d        [width of 2d hist]
+ * @param n        [number of bins for descriptor]
+ */
+static void __descriptorHist(const Mat &gaussian, vector<double> &hist, int r, int c, double ori, double scl, int d, int n);
+
+/**
+ * [Interpolates an entry into the array of orientation histograms]
+ *
+ * @param hist [2d histogram]
+ * @param rbin [row]
+ * @param cbin [col]
+ * @param obin [orientation]
+ * @param mag  [size]
+ * @param d    [width of 2d hist]
+ * @param n    [number of bins for descriptor]
+ */
+static void __interpHistEntry(vector<double> &hist, double rbin, double cbin, double obin, double mag, int d, int n);
+
+/**
+ * [converts 2d hist into 1d descriptor]
+ * @param hist [2d histogram]
+ * @param feat [feature point]
+ * @param d    [width of 2d hist]
+ * @param n    [number of bins for descriptor]
+ */
+static void __hist2Descriptor(const vector<double> &hist, Feature &feat, int d, int n);
+
+/**
+ * [normalize descriptor to length 1]
+ * @param descriptor [descriptor vector]
+ */
+static void __normalizeDescriptor(vector<double> &descriptor);
 
 #endif

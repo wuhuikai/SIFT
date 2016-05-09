@@ -1,54 +1,9 @@
 #include <iostream>
 #include <algorithm>
 
-#include <opencv2/highgui/highgui.hpp>
-#include <opencv2/nonfree/features2d.hpp>
-
 #include "SIFT.hpp"
 
-int main() {
-	const char* file = "imgs/demo.jpg";
-
-	Mat img = imread(file);
-	cvtColor(img, img, CV_BGR2GRAY);
-	img.convertTo(img, CV_32FC1, 1.0 / 255);
-
-	vector<Feature> feats;
-	extractSiftFeatures(img, feats);
-
-
-
-
-	/******************************SHOW****************************************/
-	img = imread(file);
-
-	// OPENCV
-	SiftFeatureDetector detector;
-	vector<KeyPoint> keypoints;
-	detector.detect(img, keypoints);
-	Mat output;
-	drawKeypoints(img, keypoints, output);
-	cout << "Opencv:" << keypoints.size() << endl;
-	imshow("OPEN-SIFT", output);
-
-	// MINE
-	cout << "Mine:" << feats.size() << endl;
-	Scalar colors[] = {Scalar(255, 0, 0), Scalar(0, 255, 0), Scalar(0, 0, 255), Scalar(255, 255, 0), Scalar(255, 0, 255), Scalar(0, 255, 255)};
-	for (auto it = feats.begin(); it != feats.end(); it ++) {
-		float x = (*it).__x;
-		float y = (*it).__y;
-		int octave = (*it).__octave;
-		float s = max(8.0 / pow(2.0, octave), 1.0);
-		rectangle(img, Point(x - s, y - s), Point(x + s, y + s), colors[octave % 6]);
-	}
-	imshow("MINE-SIFT", img);
-	waitKey();
-	imwrite("SIFT.jpg", img);
-
-	return 0;
-}
-
-void extractSiftFeatures(const Mat &img, vector<Feature> &feats, int intervals, double sigma,
+void extractSiftFeatures(const Mat &img, vector<KeyPoint> &keypoints, Mat &descriptor, int intervals, double sigma,
                          double contrast_thres, int curvature_thres, bool img_dbl, int descr_width, int descr_hist_bins) {
 	Mat init_img = __createInitImg(img, img_dbl, sigma);
 
@@ -62,6 +17,8 @@ void extractSiftFeatures(const Mat &img, vector<Feature> &feats, int intervals, 
 	vector<Mat> dog_pyramid;
 	__buildDogPyramid(gaussian_pyramid, dog_pyramid, octaves, intervals);
 
+
+	vector<Feature> feats;
 	__scaleSpaceExtrema(dog_pyramid, feats, octaves, intervals, contrast_thres, curvature_thres);
 
 	__calcFeatureScales(feats, sigma, intervals);
@@ -70,6 +27,34 @@ void extractSiftFeatures(const Mat &img, vector<Feature> &feats, int intervals, 
 		__adjustForImgDbl(feats);
 
 	__calcFeatureOris(feats, gaussian_pyramid, intervals + 3);
+
+	__computeDescriptors(feats, gaussian_pyramid, intervals + 3, descr_width, descr_hist_bins);
+
+	__feats2KeyPoints(feats, keypoints);
+
+	__featsVec2Mat(feats, descriptor);
+}
+
+void __feats2KeyPoints(const vector<Feature> &feats, vector<KeyPoint> &keypoints) {
+	int n = feats.size();
+	keypoints.reserve(n);
+	for (int i = 0; i < n; i ++) {
+		const Feature &feat = feats[i];
+		keypoints.push_back(KeyPoint(feat.__x, feat.__y, SIFT_KEYPOINT_DIAMETER * feat.__scl, feat.__ori,
+		                             abs(feat.__contrast), feat.__octave));
+	}
+}
+
+void __featsVec2Mat(const vector<Feature> &feats, Mat &mat) {
+	int row = feats.size();
+	int col = feats[0].__descriptor.size();
+
+	mat = Mat(row, col, CV_8UC1);
+	for (int r = 0; r < row; r ++) {
+		for (int c = 0; c < col; c ++) {
+			mat.at<unsigned char>(r, c) = feats[r].__descriptor[c];
+		}
+	}
 }
 
 static Mat __createInitImg(const Mat &img, bool img_dbl, double sigma) {
@@ -234,6 +219,7 @@ static bool __interpExtremum(const vector<Mat> &dog_pyramid, Feature &feat, int 
 	int octave = idx / layer_per_octave_dog;
 	feat.__x = (c + xc) * pow(2.0, octave);
 	feat.__y = (r + xr) * pow(2.0, octave);
+	feat.__contrast = contrast;
 
 	feat.__r = r;
 	feat.__c = c;
@@ -426,4 +412,118 @@ static void __addGoodOriFeatures(queue<Feature> &feat_queue, const vector<double
 			feat_queue.push(new_feat);
 		}
 	}
+}
+
+static void __computeDescriptors(vector<Feature> &feats, const vector<Mat> &gaussian_pyramid, int layer_per_octave, int d, int n) {
+	vector<double> hist(d * d * n);
+	for (auto it = feats.begin(); it != feats.end(); it ++) {
+		for (size_t i = 0; i < d * d * n; i ++)
+			hist[i] = 0;
+
+		Feature &feat = (*it);
+		__descriptorHist(gaussian_pyramid[feat.__octave * layer_per_octave + feat.__interval], hist,
+		                 feat.__r, feat.__c, feat.__ori, feat.__scl_octave, d, n);
+		__hist2Descriptor(hist, feat, d, n);
+	}
+}
+
+static void __descriptorHist(const Mat &gaussian, vector<double> &hist, int r, int c, double ori, double scl, int d, int n) {
+	double PI_2 = 2.0 * CV_PI;
+
+	double cos_t = cos( ori );
+	double sin_t = sin( ori );
+	double bins_per_rad = n / PI_2;
+	double exp_denom = d * d * 0.5;
+	double hist_width = SIFT_DESCR_SCL_FCTR * scl;
+	int radius = hist_width * sqrt(2) * ( d + 1.0 ) * 0.5 + 0.5;
+
+	double g_mag, g_ori;
+	for (int i = -radius; i <= radius; i++) {
+		for (int j = -radius; j <= radius; j++) {
+			double c_rot = ( j * cos_t - i * sin_t ) / hist_width;
+			double r_rot = ( j * sin_t + i * cos_t ) / hist_width;
+			double rbin = r_rot + d / 2 - 0.5;
+			double cbin = c_rot + d / 2 - 0.5;
+
+			if (rbin > -1.0  &&  rbin < d  &&  cbin > -1.0  &&  cbin < d) {
+				if (__calcGradMagOri(gaussian, r + i, c + j, g_mag, g_ori)) {
+					g_ori -= ori;
+					while ( g_ori < 0.0 )
+						g_ori += PI_2;
+					while ( g_ori >= PI_2 )
+						g_ori -= PI_2;
+
+					double obin = g_ori * bins_per_rad;
+					double w = exp(-(c_rot * c_rot + r_rot * r_rot) / exp_denom);
+					__interpHistEntry(hist, rbin, cbin, obin, g_mag * w, d, n);
+				}
+			}
+		}
+	}
+}
+
+static void __interpHistEntry(vector<double> &hist, double rbin, double cbin, double obin, double mag, int d, int n) {
+	int r0 = floor( rbin );
+	int c0 = floor( cbin );
+	int o0 = floor( obin );
+	double d_r = rbin - r0;
+	double d_c = cbin - c0;
+	double d_o = obin - o0;
+
+	for (int r = 0; r <= 1; r++) {
+		int rb = r0 + r;
+		if ( rb < 0  ||  rb >= d )
+			continue;
+
+		double v_r = mag * ( ( r == 0 ) ? 1.0 - d_r : d_r );
+		for (int c = 0; c <= 1; c++) {
+			int cb = c0 + c;
+			if ( cb < 0  ||  cb >= d )
+				continue;
+
+			double v_c = v_r * ( ( c == 0 ) ? 1.0 - d_c : d_c );
+			for (int o = 0; o <= 1; o ++) {
+				int ob = ( o0 + o ) % n;
+				double v_o = v_c * ( ( o == 0 ) ? 1.0 - d_o : d_o );
+				hist[rb * n * d + cb * n + ob] += v_o;
+			}
+		}
+	}
+}
+
+static void __hist2Descriptor(const vector<double> &hist, Feature &feat, int d, int n) {
+	vector<double> descriptor(d * d * n);
+	int idx = 0;
+	for (int r = 0; r < d; r++) {
+		for (int c = 0; c < d; c++) {
+			for (int o = 0; o < n; o++) {
+				descriptor[idx] = hist[idx];
+				idx ++;
+			}
+		}
+	}
+
+	__normalizeDescriptor(descriptor);
+	for (int i = 0; i < descriptor.size(); i++) {
+		if (descriptor[i] > SIFT_DESCR_MAG_THR)
+			descriptor[i] = SIFT_DESCR_MAG_THR;
+	}
+	__normalizeDescriptor(descriptor);
+
+	feat.__descriptor.reserve(d * d * n);
+	for (int i = 0; i < descriptor.size(); i++) {
+		int int_val = SIFT_INT_DESCR_FCTR * descriptor[i];
+		feat.__descriptor.push_back(min(255, int_val));
+	}
+}
+
+static void __normalizeDescriptor(vector<double> &descriptor) {
+	double len_sq = 0;
+	for (int i = 0; i < descriptor.size(); i++) {
+		double cur = descriptor[i];
+		len_sq += cur * cur;
+	}
+	double len_inv = 1.0 / sqrt( len_sq );
+	for (int i = 0; i < descriptor.size(); i++)
+		descriptor[i] *= len_inv;
 }
