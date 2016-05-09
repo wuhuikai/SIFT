@@ -3,6 +3,7 @@
 
 #include <opencv2/opencv.hpp>
 #include <vector>
+#include <queue>
 
 using namespace cv;
 using namespace std;
@@ -20,6 +21,8 @@ struct Feature {
 
 	float __sub_interval;
 	float __scl_octave;
+
+	float __ori;
 };
 /*****************************SIFT*********************************************/
 
@@ -40,6 +43,12 @@ struct Feature {
 #define SIFT_INIT_SIGMA 0.5
 #define SIFT_IMG_BORDER 5
 #define SIFT_MAX_INTERP_STEPS 5
+
+#define SIFT_ORI_HIST_BINS 36
+#define SIFT_ORI_SIG_FCTR 1.5
+#define SIFT_ORI_RADIUS 3.0 * SIFT_ORI_SIG_FCTR
+#define SIFT_ORI_SMOOTH_PASSES 2
+#define SIFT_ORI_PEAK_RATIO 0.8
 
 /**
  * [Detect & extract sift features for an image]
@@ -209,5 +218,56 @@ static void __calcFeatureScales(vector<Feature> &feats, double sigma, int interv
  * @param feats [feature vector]
  */
 static void __adjustForImgDbl(vector<Feature> &feats);
+
+/**
+ * [Computes a canonical orientation for each image feature]
+ *
+ * @param feats            [feature vector]
+ * @param gaussian_pyramid [gaussian pyramid]
+ * @param layer_per_octave [number of layers per octave]
+ */
+static void __calcFeatureOris(vector<Feature> &feats, const vector<Mat> &gaussian_pyramid, int layer_per_octave);
+
+/**
+ * [Compute gradient orientation histogram]
+ *
+ * @param gaussian [gaussian image]
+ * @param hist     [returned hist]
+ * @param r        [row]
+ * @param c        [col]
+ * @param n        [number of bins]
+ * @param rad      [radius of selected region]
+ * @param sigma    [sigma for gaussian smoothing]
+ */
+static void __oriHist(const Mat &gaussian, vector<double> &hist, int r, int c, int rad, double sigma);
+
+/**
+ * [Calculates the gradient magnitude and orientation]
+ *
+ * @param  gaussian [Gaussian image]
+ * @param  r        [row]
+ * @param  c        [col]
+ * @param  mag      [returned gradient magnitude]
+ * @param  ori      [returned gradient orientation]
+ *
+ * @return          [valid pixel]
+ */
+static bool __calcGradMagOri(const Mat &gaussian, int r, int c, double &mag, double &ori);
+
+/**
+ * [Gaussian smooths an orientation histogram.]
+ * @param hist [orientation histogram]
+ */
+static void __smoothOriHist(vector<double> &hist);
+
+/**
+ * [add features with orientation greater than mag_thres]
+ *
+ * @param feat_queue [queue for features]
+ * @param hist       [orientation histogram]
+ * @param mag_thres  [magnitude threshold]
+ * @param feat       [template feat]
+ */
+static void __addGoodOriFeatures(queue<Feature> &feat_queue, const vector<double> &hist, double mag_thres, const Feature &feat);
 
 #endif

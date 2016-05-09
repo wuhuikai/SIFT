@@ -1,4 +1,5 @@
 #include <iostream>
+#include <algorithm>
 
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/nonfree/features2d.hpp>
@@ -67,6 +68,8 @@ void extractSiftFeatures(const Mat &img, vector<Feature> &feats, int intervals, 
 
 	if (img_dbl)
 		__adjustForImgDbl(feats);
+
+	__calcFeatureOris(feats, gaussian_pyramid, intervals + 3);
 }
 
 static Mat __createInitImg(const Mat &img, bool img_dbl, double sigma) {
@@ -332,5 +335,95 @@ static void __adjustForImgDbl(vector<Feature> &feats) {
 		(*it).__x /= 2.0;
 		(*it).__y /= 2.0;
 		(*it).__scl /= 2.0;
+	}
+}
+
+static void __calcFeatureOris(vector<Feature> &feats, const vector<Mat> &gaussian_pyramid, int layer_per_octave) {
+	queue<Feature> feat_queue;
+	size_t n = feats.size();
+	for (size_t i = 0; i < n; i ++) {
+		feat_queue.push(feats[i]);
+	}
+
+	vector<double> hist(SIFT_ORI_HIST_BINS);
+	for (size_t i = 0; i < n; i ++) {
+		Feature feat = feat_queue.front();
+		feat_queue.pop();
+
+		for (int c = 0; c < SIFT_ORI_HIST_BINS; c ++)
+			hist[c] = 0;
+		__oriHist(gaussian_pyramid[feat.__octave * layer_per_octave + feat.__interval], hist, feat.__r, feat.__c,
+		          round(SIFT_ORI_RADIUS * feat.__scl_octave), SIFT_ORI_SIG_FCTR * feat.__scl_octave);
+
+		for (int j = 0; j < SIFT_ORI_SMOOTH_PASSES; j++)
+			__smoothOriHist(hist);
+
+		double max_ori = *max_element(hist.begin(), hist.end());
+
+		__addGoodOriFeatures(feat_queue, hist, max_ori * SIFT_ORI_PEAK_RATIO, feat);
+	}
+
+	n = feat_queue.size();
+	feats = vector<Feature>(n);
+	for (size_t i = 0; i < n; i ++) {
+		feats[i] = feat_queue.front();
+		feat_queue.pop();
+	}
+}
+
+static void __oriHist(const Mat &gaussian, vector<double> &hist, int r, int c, int rad, double sigma) {
+	double PI_2 = CV_PI * 2.0;
+
+	double exp_denom = 2.0 * sigma * sigma;
+	double mag, ori;
+	int n = hist.size();
+	for (int i = -rad; i <= rad; i++) {
+		for (int j = -rad; j <= rad; j++) {
+			if (__calcGradMagOri(gaussian, r + i, c + j, mag, ori)) {
+				double w = exp(-( i * i + j * j ) / exp_denom);
+				int bin = round( n * ( ori + CV_PI ) / PI_2 );
+				bin = ( bin < n ) ? bin : 0;
+				hist[bin] += w * mag;
+			}
+		}
+	}
+}
+
+static bool __calcGradMagOri(const Mat &gaussian, int r, int c, double &mag, double &ori) {
+	Size s = gaussian.size();
+
+	if (r > 0  &&  r < s.height - 1  &&  c > 0  &&  c < s.width - 1) {
+		float dx = gaussian.at<float>(r, c + 1) - gaussian.at<float>(r, c - 1);
+		float dy = gaussian.at<float>(r - 1, c) - gaussian.at<float>(r + 1, c);
+		mag = sqrt( dx * dx + dy * dy );
+		ori = atan2( dy, dx );
+		return true;
+	}
+
+	return false;
+}
+
+static void __smoothOriHist(vector<double> &hist) {
+	int n = hist.size();
+	for (int i = 0; i < n; i++ ) {
+		hist[i] = 0.25 * hist[(i + n - 1) % n] + 0.5 * hist[i] + 0.25 * hist[(i + 1) % n];
+	}
+}
+
+static void __addGoodOriFeatures(queue<Feature> &feat_queue, const vector<double> &hist, double mag_thres, const Feature &feat) {
+	double PI_2 = CV_PI * 2.0;
+
+	int n = hist.size();
+	for (int i = 0; i < n; i++) {
+		int l = (i == 0) ? n - 1 : i - 1;
+		int r = (i + 1) % n;
+
+		if (hist[i] > hist[l]  &&  hist[i] > hist[r]  &&  hist[i] >= mag_thres) {
+			double bin = i + 0.5 * (hist[l] - hist[r]) / (hist[l] - 2.0 * hist[i] + hist[r]);
+			bin = bin < 0 ? n + bin : bin >= n ? bin - n : bin;
+			Feature new_feat = feat;
+			new_feat.__ori = PI_2 * bin / n - CV_PI;
+			feat_queue.push(new_feat);
+		}
 	}
 }
