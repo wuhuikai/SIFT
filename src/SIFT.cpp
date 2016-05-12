@@ -97,7 +97,7 @@ void __buildGaussPyramid(const Mat &base, vector<Mat> &gaussian_pyramid, int oct
 			}
 
 			if (lay == 0) {
-				const Mat &last = gaussian_pyramid.back();
+				const Mat &last = gaussian_pyramid[gaussian_pyramid.size() - 3];
 				Size s = last.size();
 				Mat down_img(s.height / 2, s.width / 2, CV_32FC1);
 				resize(last, down_img, down_img.size(), 0, 0, CV_INTER_NN);
