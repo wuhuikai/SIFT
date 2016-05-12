@@ -23,8 +23,8 @@ void match2img(const char *img1_p, const char *img2_p, Mat &output) {
 	siftWrapper(img2, keypoints2, descriptor2);
 
 	/***************************************OPENCV*******************************/
-	SiftFeatureDetector detector;
-	SiftDescriptorExtractor extractor;
+	// SiftFeatureDetector detector;
+	// SiftDescriptorExtractor extractor;
 
 	// detector.detect(img1, keypoints1);
 	// extractor.compute(img1, keypoints1, descriptor1);
@@ -38,7 +38,7 @@ void match2img(const char *img1_p, const char *img2_p, Mat &output) {
 	matcher.knnMatch(descriptor1, descriptor2, matches, 2);
 
 	vector<DMatch> good_matches;
-	for (int i = 0; i < matches.size(); i ++) {
+	for (size_t i = 0; i < matches.size(); i ++) {
 		if (matches[i][0].distance < 0.7 * matches[i][1].distance) {
 			good_matches.push_back(matches[i][0]);
 		}

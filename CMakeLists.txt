@@ -3,6 +3,8 @@ project (SIFT)
 
 set (CMAKE_CXX_STANDARD 11)
 
+add_compile_options(-Werror -Wextra -O3)
+
 FIND_LIBRARY(OPENCV opencv_core)
 FIND_LIBRARY(OPENCV_GUI opencv_highgui)
 FIND_LIBRARY(OPENCV_IM opencv_imgproc)

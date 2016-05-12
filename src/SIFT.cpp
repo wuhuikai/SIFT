@@ -2,6 +2,7 @@
 #include <algorithm>
 
 #include "SIFT.hpp"
+#include "__SIFT.hpp"
 
 void extractSiftFeatures(const Mat &img, vector<KeyPoint> &keypoints, Mat &descriptor, int intervals, double sigma,
                          double contrast_thres, int curvature_thres, bool img_dbl, int descr_width, int descr_hist_bins) {
@@ -57,7 +58,7 @@ void __featsVec2Mat(const vector<Feature> &feats, Mat &mat) {
 	}
 }
 
-static Mat __createInitImg(const Mat &img, bool img_dbl, double sigma) {
+Mat __createInitImg(const Mat &img, bool img_dbl, double sigma) {
 	if (img_dbl) {
 		Mat init_img(img.size() * 2, CV_32FC1);
 		resize(img, init_img, init_img.size(), 0, 0, INTER_CUBIC);
@@ -74,7 +75,7 @@ static Mat __createInitImg(const Mat &img, bool img_dbl, double sigma) {
 	}
 }
 
-static void __buildGaussPyramid(const Mat &base, vector<Mat> &gaussian_pyramid, int octaves, int intervals, double sigma) {
+void __buildGaussPyramid(const Mat &base, vector<Mat> &gaussian_pyramid, int octaves, int intervals, double sigma) {
 	int layer_per_octave = intervals + 3;
 	vector<double> sigmas(layer_per_octave);
 	double k = pow(2.0f, 1.0f / intervals);
@@ -112,7 +113,7 @@ static void __buildGaussPyramid(const Mat &base, vector<Mat> &gaussian_pyramid, 
 	}
 }
 
-static void __buildDogPyramid(const vector<Mat> &gaussian_pyramid, vector<Mat> &dog_pyramid, int octaves, int intervals) {
+void __buildDogPyramid(const vector<Mat> &gaussian_pyramid, vector<Mat> &dog_pyramid, int octaves, int intervals) {
 	int layer_per_octave_dog = intervals + 2;
 	int layer_per_octave_gaussian = intervals + 3;
 	dog_pyramid.reserve(octaves * layer_per_octave_dog);
@@ -125,8 +126,8 @@ static void __buildDogPyramid(const vector<Mat> &gaussian_pyramid, vector<Mat> &
 	}
 }
 
-static void __scaleSpaceExtrema(const vector<Mat> &dog_pyramid, vector<Feature> &feats, int octaves, int intervals,
-                                double contrast_thres, int curvature_thres) {
+void __scaleSpaceExtrema(const vector<Mat> &dog_pyramid, vector<Feature> &feats, int octaves, int intervals,
+                         double contrast_thres, int curvature_thres) {
 	double prelim_contrast_thres = 0.5 * contrast_thres / intervals;
 
 	int layer_per_octave_dog = intervals + 2;
@@ -157,7 +158,7 @@ static void __scaleSpaceExtrema(const vector<Mat> &dog_pyramid, vector<Feature> 
 	}
 }
 
-static bool __isExtremum(const vector<Mat> &dog_pyramid, int idx, int r, int c) {
+bool __isExtremum(const vector<Mat> &dog_pyramid, int idx, int r, int c) {
 	float pixel_val = dog_pyramid[idx].at<float>(r, c);
 
 	if (pixel_val > 0) {
@@ -185,7 +186,7 @@ static bool __isExtremum(const vector<Mat> &dog_pyramid, int idx, int r, int c) 
 	return true;
 }
 
-static bool __interpExtremum(const vector<Mat> &dog_pyramid, Feature &feat, int idx, int r, int c, int intervals, double contrast_thres) {
+bool __interpExtremum(const vector<Mat> &dog_pyramid, Feature &feat, int idx, int r, int c, int intervals, double contrast_thres) {
 	int layer_per_octave_dog = intervals + 2;
 	Size s = dog_pyramid[idx].size();
 
@@ -231,7 +232,7 @@ static bool __interpExtremum(const vector<Mat> &dog_pyramid, Feature &feat, int 
 	return true;
 }
 
-static void __interpStep(const vector<Mat> &dog_pyramid, int idx, int r, int c, double &xi, double &xr, double &xc) {
+void __interpStep(const vector<Mat> &dog_pyramid, int idx, int r, int c, double &xi, double &xr, double &xc) {
 	Mat dD = __derivative(dog_pyramid, idx, r, c);
 	Mat H = __hessian(dog_pyramid, idx, r, c);
 	Mat H_inv = H.inv(DECOMP_SVD);
@@ -242,7 +243,7 @@ static void __interpStep(const vector<Mat> &dog_pyramid, int idx, int r, int c, 
 	xc = X.at<double>(0, 0);
 }
 
-static Mat __derivative(const vector<Mat> &dog_pyramid, int idx, int r, int c) {
+Mat __derivative(const vector<Mat> &dog_pyramid, int idx, int r, int c) {
 	Mat dI(3, 1, CV_64FC1);
 	dI.at<double>(0, 0) = (dog_pyramid[idx].at<float>(r, c + 1) - dog_pyramid[idx].at<float>(r, c - 1)) / 2.0;
 	dI.at<double>(1, 0) = (dog_pyramid[idx].at<float>(r + 1, c) - dog_pyramid[idx].at<float>(r - 1, c)) / 2.0;
@@ -251,7 +252,7 @@ static Mat __derivative(const vector<Mat> &dog_pyramid, int idx, int r, int c) {
 	return dI;
 }
 
-static Mat __hessian(const vector<Mat> &dog_pyramid, int idx, int r, int c) {
+Mat __hessian(const vector<Mat> &dog_pyramid, int idx, int r, int c) {
 	Mat H(3, 3, CV_64FC1);
 
 	double v = dog_pyramid[idx].at<float>(r, c);
@@ -278,7 +279,7 @@ static Mat __hessian(const vector<Mat> &dog_pyramid, int idx, int r, int c) {
 	return H;
 }
 
-static double __interpContrast(const vector<Mat> &dog_pyramid, int idx, int r, int c, double xi, double xr, double xc) {
+double __interpContrast(const vector<Mat> &dog_pyramid, int idx, int r, int c, double xi, double xr, double xc) {
 	Mat dD = __derivative(dog_pyramid, idx, r, c);
 	Mat X(3, 1, CV_64FC1);
 	X.at<double>(2, 0) = xi;
@@ -289,7 +290,7 @@ static double __interpContrast(const vector<Mat> &dog_pyramid, int idx, int r, i
 	return dog_pyramid[idx].at<float>(r, c) + t.at<double>(0, 0) * 0.5;
 }
 
-static bool __isTooEdgeLike(const Mat &dog, int r, int c, int curvature_thres) {
+bool __isTooEdgeLike(const Mat &dog, int r, int c, int curvature_thres) {
 	double d = dog.at<float>(r, c);
 	double dxx = dog.at<float>(r, c + 1) + dog.at<float>(r, c - 1) - 2 * d;
 	double dyy = dog.at<float>(r + 1, c) + dog.at<float>(r - 1, c) - 2 * d;
@@ -306,9 +307,7 @@ static bool __isTooEdgeLike(const Mat &dog, int r, int c, int curvature_thres) {
 	return true;
 }
 
-static void __calcFeatureScales(vector<Feature> &feats, double sigma, int intervals) {
-	int layer_per_octave_dog = intervals + 2;
-
+void __calcFeatureScales(vector<Feature> &feats, double sigma, int intervals) {
 	for (auto it = feats.begin(); it != feats.end(); it ++) {
 		float interval = (*it).__interval + (*it).__sub_interval;
 		(*it).__scl = sigma * pow(2.0, (*it).__octave + interval / intervals);
@@ -316,7 +315,7 @@ static void __calcFeatureScales(vector<Feature> &feats, double sigma, int interv
 	}
 }
 
-static void __adjustForImgDbl(vector<Feature> &feats) {
+void __adjustForImgDbl(vector<Feature> &feats) {
 	for (auto it = feats.begin(); it != feats.end(); it ++) {
 		(*it).__x /= 2.0;
 		(*it).__y /= 2.0;
@@ -324,7 +323,7 @@ static void __adjustForImgDbl(vector<Feature> &feats) {
 	}
 }
 
-static void __calcFeatureOris(vector<Feature> &feats, const vector<Mat> &gaussian_pyramid, int layer_per_octave) {
+void __calcFeatureOris(vector<Feature> &feats, const vector<Mat> &gaussian_pyramid, int layer_per_octave) {
 	queue<Feature> feat_queue;
 	size_t n = feats.size();
 	for (size_t i = 0; i < n; i ++) {
@@ -357,7 +356,7 @@ static void __calcFeatureOris(vector<Feature> &feats, const vector<Mat> &gaussia
 	}
 }
 
-static void __oriHist(const Mat &gaussian, vector<double> &hist, int r, int c, int rad, double sigma) {
+void __oriHist(const Mat &gaussian, vector<double> &hist, int r, int c, int rad, double sigma) {
 	double PI_2 = CV_PI * 2.0;
 
 	double exp_denom = 2.0 * sigma * sigma;
@@ -375,7 +374,7 @@ static void __oriHist(const Mat &gaussian, vector<double> &hist, int r, int c, i
 	}
 }
 
-static bool __calcGradMagOri(const Mat &gaussian, int r, int c, double &mag, double &ori) {
+bool __calcGradMagOri(const Mat &gaussian, int r, int c, double &mag, double &ori) {
 	Size s = gaussian.size();
 
 	if (r > 0  &&  r < s.height - 1  &&  c > 0  &&  c < s.width - 1) {
@@ -389,14 +388,14 @@ static bool __calcGradMagOri(const Mat &gaussian, int r, int c, double &mag, dou
 	return false;
 }
 
-static void __smoothOriHist(vector<double> &hist) {
+void __smoothOriHist(vector<double> &hist) {
 	int n = hist.size();
 	for (int i = 0; i < n; i++ ) {
 		hist[i] = 0.25 * hist[(i + n - 1) % n] + 0.5 * hist[i] + 0.25 * hist[(i + 1) % n];
 	}
 }
 
-static void __addGoodOriFeatures(queue<Feature> &feat_queue, const vector<double> &hist, double mag_thres, const Feature &feat) {
+void __addGoodOriFeatures(queue<Feature> &feat_queue, const vector<double> &hist, double mag_thres, const Feature &feat) {
 	double PI_2 = CV_PI * 2.0;
 
 	int n = hist.size();
@@ -414,10 +413,10 @@ static void __addGoodOriFeatures(queue<Feature> &feat_queue, const vector<double
 	}
 }
 
-static void __computeDescriptors(vector<Feature> &feats, const vector<Mat> &gaussian_pyramid, int layer_per_octave, int d, int n) {
+void __computeDescriptors(vector<Feature> &feats, const vector<Mat> &gaussian_pyramid, int layer_per_octave, int d, int n) {
 	vector<double> hist(d * d * n);
 	for (auto it = feats.begin(); it != feats.end(); it ++) {
-		for (size_t i = 0; i < d * d * n; i ++)
+		for (int i = 0; i < d * d * n; i ++)
 			hist[i] = 0;
 
 		Feature &feat = (*it);
@@ -427,7 +426,7 @@ static void __computeDescriptors(vector<Feature> &feats, const vector<Mat> &gaus
 	}
 }
 
-static void __descriptorHist(const Mat &gaussian, vector<double> &hist, int r, int c, double ori, double scl, int d, int n) {
+void __descriptorHist(const Mat &gaussian, vector<double> &hist, int r, int c, double ori, double scl, int d, int n) {
 	double PI_2 = 2.0 * CV_PI;
 
 	double cos_t = cos( ori );
@@ -462,7 +461,7 @@ static void __descriptorHist(const Mat &gaussian, vector<double> &hist, int r, i
 	}
 }
 
-static void __interpHistEntry(vector<double> &hist, double rbin, double cbin, double obin, double mag, int d, int n) {
+void __interpHistEntry(vector<double> &hist, double rbin, double cbin, double obin, double mag, int d, int n) {
 	int r0 = floor( rbin );
 	int c0 = floor( cbin );
 	int o0 = floor( obin );
@@ -491,7 +490,7 @@ static void __interpHistEntry(vector<double> &hist, double rbin, double cbin, do
 	}
 }
 
-static void __hist2Descriptor(const vector<double> &hist, Feature &feat, int d, int n) {
+void __hist2Descriptor(const vector<double> &hist, Feature &feat, int d, int n) {
 	vector<double> descriptor(d * d * n);
 	int idx = 0;
 	for (int r = 0; r < d; r++) {
@@ -504,26 +503,26 @@ static void __hist2Descriptor(const vector<double> &hist, Feature &feat, int d, 
 	}
 
 	__normalizeDescriptor(descriptor);
-	for (int i = 0; i < descriptor.size(); i++) {
+	for (size_t i = 0; i < descriptor.size(); i++) {
 		if (descriptor[i] > SIFT_DESCR_MAG_THR)
 			descriptor[i] = SIFT_DESCR_MAG_THR;
 	}
 	__normalizeDescriptor(descriptor);
 
 	feat.__descriptor.reserve(d * d * n);
-	for (int i = 0; i < descriptor.size(); i++) {
+	for (size_t i = 0; i < descriptor.size(); i++) {
 		int int_val = SIFT_INT_DESCR_FCTR * descriptor[i];
 		feat.__descriptor.push_back(min(255, int_val));
 	}
 }
 
-static void __normalizeDescriptor(vector<double> &descriptor) {
+void __normalizeDescriptor(vector<double> &descriptor) {
 	double len_sq = 0;
-	for (int i = 0; i < descriptor.size(); i++) {
+	for (size_t i = 0; i < descriptor.size(); i++) {
 		double cur = descriptor[i];
 		len_sq += cur * cur;
 	}
 	double len_inv = 1.0 / sqrt( len_sq );
-	for (int i = 0; i < descriptor.size(); i++)
+	for (size_t i = 0; i < descriptor.size(); i++)
 		descriptor[i] *= len_inv;
 }
